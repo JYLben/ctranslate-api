@@ -2,26 +2,31 @@ import os
 import re
 import sys
 from flask import Flask, request, jsonify
-from transformers import AutoTokenizer
+# 🌟 关键修改：显式导入 MarianTokenizer，不再依赖自动类
+from transformers import MarianTokenizer
 import ctranslate2
+import huggingface_hub
 
 app = Flask(__name__)
 
-# 使用 ctranslate2 的动态下载和转换（对低内存服务器极其友好）
-# 这里我们直接从 Hugging Face 引用别人已经转换好的轻量化（int8 量化）模型，内存仅需 ~100MB
-ZH_EN_MODEL = "ctranslate2/opus-mt-zh-en"
-EN_ZH_MODEL = "ctranslate2/opus-mt-en-zh"
+# 压制不必要的警告
+os.environ["HF_HUB_DISABLE_SYMLINKS_WARNING"] = "1"
 
-print("🔄 正在初始化超轻量推理引擎...")
+print("🔄 正在初始化超轻量 CTranslate2 推理引擎...")
 try:
-    # 提前载入分词器
-    tokenizer_zh_en = AutoTokenizer.from_pretrained("Helsinki-NLP/opus-mt-zh-en")
-    tokenizer_en_zh = AutoTokenizer.from_pretrained("Helsinki-NLP/opus-mt-en-zh")
+    # 1. 下载 CTranslate2 轻量化 int8 模型（仅 ~100MB 左右，极省内存）
+    model_zh_en_path = huggingface_hub.snapshot_download(repo_id="PolyAI/opus-mt-zh-en-ct2-int8")
+    model_en_zh_path = huggingface_hub.snapshot_download(repo_id="PolyAI/opus-mt-en-zh-ct2-int8")
     
-    # 载入轻量化翻译器（自动下载）
-    translator_zh_en = ctranslate2.Translator(ZH_EN_MODEL, device="cpu")
-    translator_en_zh = ctranslate2.Translator(EN_ZH_MODEL, device="cpu")
-    print("✨ CTranslate2 轻量化模型加载成功！内存占用极低。")
+    # 2. 🌟 显式加载配套的专用 Marian 分词器
+    tokenizer_zh_en = MarianTokenizer.from_pretrained("Helsinki-NLP/opus-mt-zh-en")
+    tokenizer_en_zh = MarianTokenizer.from_pretrained("Helsinki-NLP/opus-mt-en-zh")
+    
+    # 3. 载入轻量化翻译引擎
+    translator_zh_en = ctranslate2.Translator(model_zh_en_path, device="cpu")
+    translator_en_zh = ctranslate2.Translator(model_en_zh_path, device="cpu")
+    
+    print("✨ CTranslate2 轻量化模型与分词器全部加载成功！")
 except Exception as e:
     print(f"❌ 初始化失败: {e}")
     sys.exit(1)
