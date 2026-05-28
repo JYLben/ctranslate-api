@@ -1,0 +1,4 @@
+flask
+ctranslate2
+transformers
+gunicorn
