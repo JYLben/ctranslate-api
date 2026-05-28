@@ -1,4 +1,6 @@
 flask
 ctranslate2
 transformers
+huggingface-hub
+sentencepiece
 gunicorn
