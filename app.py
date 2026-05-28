@@ -1,6 +1,7 @@
 import os
 import re
 import sys
+import gc
 from flask import Flask, request, jsonify
 from transformers import MarianTokenizer
 import ctranslate2
@@ -23,11 +24,22 @@ try:
     tokenizer_en_zh = MarianTokenizer.from_pretrained("Helsinki-NLP/opus-mt-en-zh")
     
     # 2. 直接从项目内置文件夹中载入已经量化好的轻量推理引擎
+    # 💡 关键改动：强制限制单线程（inter_threads=1, intra_threads=1），防止多线程抢占内存与CPU
     print("📦 正在直接加载内置轻量化模型...")
-    translator_zh_en = ctranslate2.Translator(ZH_EN_PATH, device="cpu")
-    translator_en_zh = ctranslate2.Translator(EN_ZH_PATH, device="cpu")
+    translator_zh_en = ctranslate2.Translator(
+        ZH_EN_PATH, 
+        device="cpu", 
+        inter_threads=1, 
+        intra_threads=1
+    )
+    translator_en_zh = ctranslate2.Translator(
+        EN_ZH_PATH, 
+        device="cpu", 
+        inter_threads=1, 
+        intra_threads=1
+    )
     
-    print("🚀 恭喜！本地模型全部直接加载成功，已完美在 512MB 限制内上线。")
+    print("🚀 恭喜！本地单线程模型全部直接加载成功，已完美在 512MB 限制内上线。")
 except Exception as e:
     print(f"❌ 初始化失败: {e}")
     sys.exit(1)
@@ -54,6 +66,11 @@ def translate_api():
             results = translator_en_zh.translate_batch([source])
             target_tokens = results[0].hypotheses[0]
             translation = tokenizer_en_zh.decode(tokenizer_en_zh.convert_tokens_to_ids(target_tokens))
+            
+            # 翻译完立刻释放临时内存
+            del source, results, target_tokens
+            gc.collect()
+            
             return jsonify({"translation": translation, "detected_lang": "en", "target_lang": "zh"})
         else:
             # 中译英
@@ -61,6 +78,11 @@ def translate_api():
             results = translator_zh_en.translate_batch([source])
             target_tokens = results[0].hypotheses[0]
             translation = tokenizer_zh_en.decode(tokenizer_zh_en.convert_tokens_to_ids(target_tokens))
+            
+            # 翻译完立刻释放临时内存
+            del source, results, target_tokens
+            gc.collect()
+            
             return jsonify({"translation": translation, "detected_lang": "zh", "target_lang": "en"})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -70,5 +92,6 @@ def health_check():
     return "OK", 200
 
 if __name__ == '__main__':
-    port = int(os.environ.get("PORT", 8000))
+    # 绑定 Render 要求的环境变量端口
+    port = int(os.environ.get("PORT", 10000))
     app.run(host='0.0.0.0', port=port)
